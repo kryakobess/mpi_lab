@@ -67,15 +67,25 @@ int main(int argc, char **argv) {
         MPI_Bcast(vector, cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
 
+    double local_start_time = MPI_Wtime();
+
     matrix_vector_multiply(local_matrix, vector, local_result, local_rows, cols);
 
+    double local_end_time = MPI_Wtime();
+    double local_work_time = local_end_time - local_start_time;
+
     MPI_Gather(local_result, local_rows, MPI_DOUBLE, result, local_rows, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    double total_work_time;
+    MPI_Reduce(&local_work_time, &total_work_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         printf("Resulting vector:\n");
         for (int i = 0; i < rows; i++) {
             printf("%f\n", result[i]);
         }
+
+        printf("Total work time: %f\n", total_work_time);
 
         free(matrix);
         free(vector);
