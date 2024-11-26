@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     matrix_vector_multiply(local_matrix, vector, local_result, local_rows, cols);
 
     double local_end_time = MPI_Wtime();
-    double local_work_time = local_end_time - local_start_time;
+    double local_work_time = (local_end_time - local_start_time) * 1000;
 
     MPI_Gather(local_result, local_rows, MPI_DOUBLE, result, local_rows, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
@@ -85,14 +85,13 @@ int main(int argc, char **argv) {
             printf("%f\n", result[i]);
         }
 
-        printf("Total work time: %f\n", total_work_time);
+        printf("Total work time in ms: %f\n", total_work_time);
 
         free(matrix);
         free(vector);
         free(result);
     }
 
-    // Очистка памяти локальных массивов
     free(local_matrix);
     free(local_result);
     if (rank != 0) {
