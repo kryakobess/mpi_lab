@@ -2,10 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int rows = 6; // Общее количество строк матрицы
-int cols = 2; // Количество столбцов матрицы
-
-void matrix_vector_multiply(double *local_matrix, double *vector, double *local_result, int local_rows) {
+void matrix_vector_multiply(double *local_matrix, double *vector, double *local_result, int local_rows, int cols) {
     for (int i = 0; i < local_rows; i++) {
         local_result[i] = 0.0;
         for (int j = 0; j < cols; j++) {
@@ -22,18 +19,31 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    int rows, cols;
+
+    if (rank == 0) {
+        printf("Enter number of rows: \n");
+        scanf("%d", &rows);
+        printf("Enter number of columns: \n");
+        scanf("%d", &cols);
+
+        if (rows % size != 0) {
+            printf("Error: number of rows should be divisible by the number of processes.\n");
+            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        }
+    }
+
+    MPI_Bcast(&rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
     double *matrix = NULL;
     double *vector = NULL;
     double *result = NULL;
 
-    // Определение локального числа строк для каждого процесса
-    if (rows % size != 0 && rank == 0) {
-        printf("Error: matrix rows should be divisible by number of processes.\n");
-        MPI_Finalize();
-        return EXIT_FAILURE;
-    }
+    int local_rows = rows / size;
+    double *local_matrix = malloc(local_rows * cols * sizeof(double));
+    double *local_result = malloc(local_rows * sizeof(double));
 
-    // Инициализация матрицы и вектора только на процессе 0
     if (rank == 0) {
         matrix = malloc(rows * cols * sizeof(double));
         vector = malloc(cols * sizeof(double));
@@ -44,26 +54,12 @@ int main(int argc, char **argv) {
             matrix[i] = i + 1; // Пример: матрица заполняется числами 1, 2, 3, ...
         }
         for (int i = 0; i < cols; i++) {
-            vector[i] = 1.0; // Пример: вектор заполняется единицами
+            vector[i] = i + 1; // Пример: вектор заполняется единицами
         }
     }
 
-    // Распределение памяти для локальной матрицы, вектора и результата
-    int local_rows = rows / size;
-    double *local_matrix = malloc(local_rows * cols * sizeof(double));
-    double *local_result = malloc(local_rows * sizeof(double));
-    if (rank == 0) {
-        // Рассылка строк матрицы всем процессам
-        MPI_Scatter(matrix, local_rows * cols, MPI_DOUBLE,
-                    local_matrix, local_rows * cols, MPI_DOUBLE,
-                    0, MPI_COMM_WORLD);
-    } else {
-        MPI_Scatter(NULL, local_rows * cols, MPI_DOUBLE,
-                    local_matrix, local_rows * cols, MPI_DOUBLE,
-                    0, MPI_COMM_WORLD);
-    }
+    MPI_Scatter(matrix, local_rows * cols, MPI_DOUBLE, local_matrix, local_rows * cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    // Рассылка вектора всем процессам
     if (rank == 0) {
         MPI_Bcast(vector, cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     } else {
@@ -71,22 +67,16 @@ int main(int argc, char **argv) {
         MPI_Bcast(vector, cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
 
-    // Локальное умножение
-    matrix_vector_multiply(local_matrix, vector, local_result, local_rows);
+    matrix_vector_multiply(local_matrix, vector, local_result, local_rows, cols);
 
-    // Сбор результата обратно в процесс 0
-    MPI_Gather(local_result, local_rows, MPI_DOUBLE,
-               result, local_rows, MPI_DOUBLE,
-               0, MPI_COMM_WORLD);
+    MPI_Gather(local_result, local_rows, MPI_DOUBLE, result, local_rows, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
-        // Вывод результата
         printf("Resulting vector:\n");
         for (int i = 0; i < rows; i++) {
             printf("%f\n", result[i]);
         }
 
-        // Очистка памяти
         free(matrix);
         free(vector);
         free(result);
