@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <math.h>
 
-int rows;
-int cols;
 
 void matrix_vector_multiply(double *local_matrix, double *vector, double *partial_result, int local_rows, int local_cols, const int result_index_offset) {
     for (int i = 0; i < local_rows; i++) {
@@ -42,6 +40,9 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    int rows;
+    int cols;
+
     int q = (int) sqrt(size);    
     if (rank == 0) {
         printf("Enter number of rows: \n");
@@ -71,20 +72,16 @@ int main(int argc, char **argv) {
         A = malloc(rows * cols * sizeof(double));
         B = malloc(rows * cols * sizeof(double));
         C = malloc(rows * cols * sizeof(double));
-        block_matrix_A = malloc(block_rows * block_cols * sizeof(double));
-        block_matrix_B = malloc(block_rows * block_cols * sizeof(double));
+        block_matrix_A = malloc(rows * cols * sizeof(double));
+        block_matrix_B = malloc(rows * cols * sizeof(double));
 
         for (int i = 0; i < rows * cols; i++) {
             A[i] = i + 1;
-            B[i] = i + 1;
+            B[i] = i + rows * cols + 1;
         }
 
         divide_to_block_matrix(rows, cols, q, A, block_matrix_A);
         divide_to_block_matrix(cols, rows, q, B, block_matrix_B);
-        for (int i = 0; i < rows * cols; i++) {
-            printf("%f ", block_matrix_B[i]);
-        }
-        printf("\n");
     }
 
     // // Распределение памяти для локальной матрицы, вектора и результата
