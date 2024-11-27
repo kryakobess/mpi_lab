@@ -81,36 +81,46 @@ int main(int argc, char **argv) {
         }
 
         divide_to_block_matrix(rows, cols, q, A, block_matrix_A);
+
+        for (int i = 0; i < rows * cols; ++i) {
+            printf("%f ", block_matrix_A[i]);
+        }
+        printf("\n");
         divide_to_block_matrix(cols, rows, q, B, block_matrix_B);
     }
 
-    // // Распределение памяти для локальной матрицы, вектора и результата
-    // double *local_matrix = malloc(local_rows * local_cols * sizeof(double));
-    // double *partial_result = malloc(rows * sizeof(double));
-    // double *local_vector = malloc(local_cols * sizeof(double));
-    // int *cur_index = malloc(sizeof(int));
-    // if (rank == 0) {
-    //     MPI_Scatter(block_matrix, local_rows * local_cols, MPI_DOUBLE,
-    //                 local_matrix, local_rows * local_cols, MPI_DOUBLE,
-    //                 0, MPI_COMM_WORLD);
-    // } else {
-    //     MPI_Scatter(NULL, local_rows * local_cols, MPI_DOUBLE,
-    //                 local_matrix, local_rows * local_cols, MPI_DOUBLE,
-    //                 0, MPI_COMM_WORLD);
+    MPI_Comm cartCommunicator;
+    int dim[2] = {q, q};
+    int periodic[2] = {1, 1}; 
+    int coords[2];
+    int left = -1;
+    int right = -1;
+    int up = -1;
+    int down = -1;
+	MPI_Cart_create(MPI_COMM_WORLD, 2, dim, periodic, 1, &cartCommunicator);
+
+    // Распределение памяти для локальной матрицы, вектора и результата
+    double *block_A = malloc(block_rows * block_cols * sizeof(double));
+    double *block_B = malloc(block_rows * block_cols * sizeof(double));
+    double *block_C = malloc(block_rows * block_cols * sizeof(double));
+
+    MPI_Scatter(block_matrix_A, block_rows * block_cols, MPI_DOUBLE, block_A, block_rows * block_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Scatter(block_matrix_B, block_rows * block_cols, MPI_DOUBLE, block_B, block_rows * block_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    MPI_Cart_coords(cartCommunicator, rank, 2, coords);
+    //printf("rank: %d, left: %d, right: %d, coord[0]: %d, coord[1]: %d, block_rows = %d, block_cols = %d\n", rank, left, right, coords[0], coords[1], block_rows, block_cols);
+    MPI_Cart_shift(cartCommunicator, 1, coords[0], &left, &right);
+    //printf("shifted. rank: %d, left: %d, right: %d, coord[0]: %d, coord[1]: %d\n", rank, left, right, coords[0], coords[1]);
+	MPI_Sendrecv_replace(block_A, block_rows * block_cols, MPI_DOUBLE, left, 1, right, 1, cartCommunicator, MPI_STATUS_IGNORE);
+    
+	MPI_Cart_shift(cartCommunicator, 0, coords[1], &up, &down);
+	MPI_Sendrecv_replace(block_B, block_rows * block_cols, MPI_DOUBLE, up, 1, down, 1, cartCommunicator, MPI_STATUS_IGNORE);
+
+    // for (int i = 0; i < block_rows * block_cols; ++i) {
+    //     printf("rank: %d mat: %f\n", rank, block_A[i]);
     // }
 
-    // if (rank == 0) {
-    //     MPI_Scatter(vector, local_cols, MPI_DOUBLE, local_vector, local_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    // } else {
-    //     MPI_Scatter(NULL, local_cols, MPI_DOUBLE, local_vector, local_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    // }
-
-    // if (rank == 0) {
-    //     MPI_Scatter(result_indeces, 1, MPI_INT, cur_index, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    // } else {
-    //     MPI_Scatter(NULL, 1, MPI_INT, cur_index, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    // }
-
+    
     // matrix_vector_multiply(local_matrix, local_vector, partial_result, local_rows, local_cols, *cur_index);
 
     // int code = MPI_Reduce(partial_result, result, rows, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -131,10 +141,9 @@ int main(int argc, char **argv) {
     }
 
     // // Очистка памяти локальных массивов
-    // free(local_matrix);
-    // free(local_vector);
-    // free(partial_result);
-    // free(cur_index);
+    free(block_A);
+    free(block_B);
+    free(block_C);
 
     MPI_Finalize();
     return EXIT_SUCCESS;
