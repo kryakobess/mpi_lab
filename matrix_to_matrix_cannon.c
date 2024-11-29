@@ -3,9 +3,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+//#define PRINT_RESULT
+
 
 void multiply_matrix(double* A, double* B, int rowsA, int colsArowsB, int colsB, double* C) {
-
     for (int i = 0; i < rowsA * colsB; i++) {
         C[i] = 0.0;
     }
@@ -14,15 +15,9 @@ void multiply_matrix(double* A, double* B, int rowsA, int colsArowsB, int colsB,
         for (int j = 0; j < colsB; j++) {
             for (int k = 0; k < colsArowsB; k++) {
                 C[i * colsB + j] += A[i * colsArowsB + k] * B[k * colsB + j];
-                //printf("i = %d, j = %d, k = %d, %f += %f * %f\n", i, j, k, C[i * colsB + j], A[i * colsArowsB + k], B[k * colsB + j]);
             }
         }
     }
-
-    // for (int i = 0; i < rowsA * colsB; i++) {
-    //     printf("%f ", C[i]);
-    // }
-    // printf("\n");
 }
 
 void divide_to_block_matrix(int rows, int cols, int q, const double* matrix, double* block_matrix) {
@@ -79,6 +74,7 @@ int main(int argc, char **argv) {
     double *C = NULL;
     double *block_matrix_A = NULL;
     double *block_matrix_B = NULL;
+    double *gathered_C = NULL;
 
     int block_rowsA = rowsA / q;
     int block_colsA_rowsB = colsArowsB / q;
@@ -88,6 +84,7 @@ int main(int argc, char **argv) {
         A = malloc(rowsA * colsArowsB * sizeof(double));
         B = malloc(colsArowsB * colsB * sizeof(double));
         C = calloc(rowsA * colsB, sizeof(double));
+        gathered_C = calloc(rowsA * colsB, sizeof(double));
         block_matrix_A = malloc(rowsA * colsArowsB * sizeof(double));
         block_matrix_B = malloc(colsArowsB * colsB * sizeof(double));
 
@@ -101,16 +98,7 @@ int main(int argc, char **argv) {
         }        
 
         divide_to_block_matrix(rowsA, colsArowsB, q, A, block_matrix_A);
-        // for (int i = 0; i < rowsA * colsArowsB; ++i) {
-        //     printf("%f ", block_matrix_A[i]);
-        // }
-        // printf("\n");
-
         divide_to_block_matrix(colsArowsB, colsB, q, B, block_matrix_B);
-        // for (int i = 0; i < colsArowsB * colsB; ++i) {
-        //     printf("%f ", block_matrix_B[i]);
-        // }
-        // printf("\n");
     }
 
     MPI_Comm cartCommunicator;
@@ -132,25 +120,22 @@ int main(int argc, char **argv) {
     MPI_Scatter(block_matrix_A, block_rowsA * block_colsA_rowsB, MPI_DOUBLE, block_A, block_rowsA * block_colsA_rowsB, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Scatter(block_matrix_B, block_colsA_rowsB * block_colsB, MPI_DOUBLE, block_B, block_colsA_rowsB * block_colsB, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start_time = MPI_Wtime();
+
     MPI_Cart_coords(cartCommunicator, rank, 2, coords);
-    //printf("rank: %d, left: %d, right: %d, coord[0]: %d, coord[1]: %d, block_rows = %d, block_cols = %d\n", rank, left, right, coords[0], coords[1], block_rows, block_cols);
+
     MPI_Cart_shift(cartCommunicator, 1, coords[0], &left, &right);
-    //printf("shifted. rank: %d, left: %d, right: %d, coord[0]: %d, coord[1]: %d\n", rank, left, right, coords[0], coords[1]);
 	MPI_Sendrecv_replace(block_A, block_rowsA * block_colsA_rowsB, MPI_DOUBLE, left, 1, right, 1, cartCommunicator, MPI_STATUS_IGNORE);
     
 	MPI_Cart_shift(cartCommunicator, 0, coords[1], &up, &down);
 	MPI_Sendrecv_replace(block_B, block_colsA_rowsB * block_colsB, MPI_DOUBLE, up, 1, down, 1, cartCommunicator, MPI_STATUS_IGNORE);
-
-    for (int i = 0; i < block_colsA_rowsB * block_colsB; ++i) {
-         printf("rank: %d mat: %f\n", rank, block_B[i]);
-    }
 
     for (int i = 0; i < q; ++i) {
         multiply_matrix(block_A, block_B, block_rowsA, block_colsA_rowsB, block_colsB, partitial_block_C);
 
         for (int j = 0; j < block_rowsA * block_colsB; ++j) {
             block_C[j] += partitial_block_C[j];
-           // printf("rank = %d, C[%d] = %f\n", rank, j, block_C[j]);
         }
 
         MPI_Cart_shift(cartCommunicator, 1, 1, &left, &right);
@@ -159,30 +144,33 @@ int main(int argc, char **argv) {
         MPI_Sendrecv_replace(block_B, block_colsA_rowsB * block_colsB, MPI_DOUBLE, up, 1, down, 1, cartCommunicator, MPI_STATUS_IGNORE);
     }
 
-    for (int i = 0; i < block_rowsA * block_colsB; ++i) {
-        printf("rank = %d, C[%d] = %f\n", rank, i, block_C[i]);
-    }
+    MPI_Gather(block_C, block_rowsA * block_colsB, MPI_DOUBLE, gathered_C, block_rowsA * block_colsB, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    MPI_Gather(block_C, block_rowsA * block_colsB, MPI_DOUBLE, C, block_rowsA * block_colsB, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
+    double end_time = MPI_Wtime();
+    double work_time = (end_time - start_time) * 1000;
 
     if (rank == 0) {
+        divide_to_block_matrix(rowsA, colsB, q, gathered_C, C);
+    #  ifdef PRINT_RESULT
         printf("Result matrix: \n");
         for (int i = 0; i < rowsA; ++i) {
             for (int j = 0; j < colsB; ++j) {
-                printf("%f ", C[i * rowsA + j]);
+                printf("%f ", C[i * colsB + j]);
             }
             printf("\n");
         }
+    #  endif
+        printf("Total work time in ms: %f\n", work_time);
 
-        // Очистка памяти
         free(A);
         free(B);
         free(C);
         free(block_matrix_A);
+        free(gathered_C);
         free(block_matrix_B);
     }
 
-    // // Очистка памяти локальных массивов
     free(block_A);
     free(block_B);
     free(block_C);
