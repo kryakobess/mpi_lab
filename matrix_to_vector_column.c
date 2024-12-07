@@ -69,23 +69,25 @@ int main(int argc, char **argv) {
     MPI_Scatter(col_matrix, rows * local_cols, MPI_DOUBLE, local_matrix, rows * local_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Scatter(vector, local_cols, MPI_DOUBLE, local_vector, local_cols, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    double local_start_time = MPI_Wtime();
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start_time = MPI_Wtime();
 
     local_matrix_vector_multiply(local_matrix, local_vector, partial_result, local_cols, rows);
-
-    double local_end_time = MPI_Wtime();
-    double local_work_time = (local_end_time - local_start_time) * 1000;
-
     MPI_Reduce(partial_result, result, rows, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-    double total_work_time;
-    MPI_Reduce(&local_work_time, &total_work_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double end_time = MPI_Wtime();
+    double work_time = (end_time - start_time) * 1000;
 
     if (rank == 0) {
+        #ifdef PRINT_RESULT
         printf("Resulting vector:\n");
         for (int i = 0; i < rows; i++) {
             printf("%f\n", result[i]);
         }
-        printf("Total work time in ms: %f\n", total_work_time);
+        #endif
+        
+        printf("Total work time in ms: %f\n", work_time);
 
         free(matrix);
         free(vector);
