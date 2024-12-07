@@ -3,15 +3,12 @@
 #include <stdlib.h>
 #include <math.h>
 
-int rows = 4;
-int cols = 6;
-
 void matrix_vector_multiply(double *local_matrix, double *vector, double *partial_result, int local_rows, int local_cols, const int result_index_offset) {
     for (int i = 0; i < local_rows; i++) {
         partial_result[i] = 0.0;
         for (int j = 0; j < local_cols; j++) {
             partial_result[i + result_index_offset * local_rows] += local_matrix[i * local_cols + j] * vector[j];
-            printf("result_index_offset:%d, i:%d j=%d partial_result=%f, cur_el=%f * vect_el=%f\n", (i + result_index_offset * local_rows), i, j, partial_result[i + result_index_offset * local_rows], local_matrix[i * local_cols + j], vector[j]);
+            //printf("result_index_offset:%d, i:%d j=%d partial_result=%f, cur_el=%f * vect_el=%f\n", (i + result_index_offset * local_rows), i, j, partial_result[i + result_index_offset * local_rows], local_matrix[i * local_cols + j], vector[j]);
         }
     }
 }
@@ -23,14 +20,25 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+
+    int rows;
+    int cols;
     int block_size = (int) sqrt(size);
-    if ((block_size * block_size != size) || ((rows * cols) % size != 0)) {
-        if (rank == 0) {
-            printf("Error: matrix rows and cols should be divisible by number of processes.\n");
+
+    if (rank == 0) {
+        printf("Enter number of rows: \n");
+        scanf("%d", &rows);
+        printf("Enter number of columns: \n");
+        scanf("%d", &cols);
+
+        if ((block_size * block_size != size) || ((rows * cols) % size != 0)) {
+            printf("Error: matrix rows and cols should be divisible by number of processes and block should be a perfect square.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        MPI_Finalize();
-        return EXIT_FAILURE;
     }
+
+    MPI_Bcast(&rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     double *matrix = NULL;
     double *vector = NULL;
@@ -45,7 +53,7 @@ int main(int argc, char **argv) {
         matrix = malloc(rows * cols * sizeof(double));
         block_matrix = malloc(rows * cols * sizeof(double));
         result_indeces = malloc(size * sizeof(int));
-        vector = malloc(cols * local_rows * sizeof(double));
+        vector = malloc(cols * block_size * sizeof(double));
         result = calloc(rows, sizeof(double));
 
         for (int i = 0; i < rows * cols; i++) {
@@ -66,19 +74,15 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        for (int i = 0; i < rows * cols; i++) {
-            printf("%f ", block_matrix[i]);
-        }
-        printf("\n");
 
-        for (int i = 0; i < cols * local_rows; i++) {
+        for (int i = 0; i < cols * block_size; i++) {
             vector[i] = i + 1.0;
             if (i >= cols) {
                 vector[i] = vector[i % cols];
             }
         }
         
-        int row_block_count = size / local_rows;
+        int row_block_count = size / block_size;
         for (int i = 0; i < size; ++i) {
             result_indeces[i] = (int) (i / row_block_count);
         }
@@ -111,16 +115,27 @@ int main(int argc, char **argv) {
         MPI_Scatter(NULL, 1, MPI_INT, cur_index, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start_time = MPI_Wtime();
+
     matrix_vector_multiply(local_matrix, local_vector, partial_result, local_rows, local_cols, *cur_index);
 
-    int code = MPI_Reduce(partial_result, result, rows, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(partial_result, result, rows, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double end_time = MPI_Wtime();
+    double work_time = (end_time - start_time) * 1000;
 
     if (rank == 0) {
         // Вывод результата
+        #ifdef PRINT_RESULT
         printf("Resulting vector:\n");
         for (int i = 0; i < rows; i++) {
             printf("%f\n", result[i]);
         }
+        #endif
+
+        printf("Total work time in ms: %f\n", work_time);
 
         // Очистка памяти
         free(matrix);
